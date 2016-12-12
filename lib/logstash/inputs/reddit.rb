@@ -5,14 +5,14 @@ require 'stud/interval'
 require 'socket'
 require 'net/https'
 require 'uri'
-require 'json'
 
 class LogStash::Inputs::Reddit < LogStash::Inputs::Base
 
   config_name 'reddit'
-  default :codec, 'plain'
+  default :codec, 'json'
   config :subreddit, :validate => :string, :default => 'elastic'
   config :interval, :validate => :number, :default => 10
+  config :target, :validate => :string
 
   public
   def register
@@ -26,11 +26,13 @@ class LogStash::Inputs::Reddit < LogStash::Inputs::Base
     # we can abort the loop if stop? becomes true
     while !stop?
       response = @http.request(@get)
-      json = JSON.parse(response.body)
-      json['data']['children'].each do |data|
-        event = LogStash::Event.new('message' => data, 'host' => @host)
-        decorate(event)
-        queue << event
+      @codec.decode(response.body) do |decoded|
+        json = decoded.to_hash
+        json['data']['children'].each do |data|
+          event = @target ? LogStash::Event.new(@target => data, 'host' => @host) : LogStash::Event.new(data)
+          decorate(event)
+          queue << event
+        end
       end
       Stud.stoppable_sleep(@interval) { stop? }
     end
